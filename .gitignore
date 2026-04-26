@@ -201,6 +201,7 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
+web/weights/*
 # Marimo
 marimo/_static/
 marimo/_lsp/

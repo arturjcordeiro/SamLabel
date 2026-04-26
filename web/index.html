@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SAM Labeler</title>
+<link rel="stylesheet" href="static/css/app.css">
+</head>
+<body>
+
+<!-- ── Top bar ────────────────────────────────────────────────────────────── -->
+<div id="topbar">
+  <div class="logo">SAM<span>labeler</span></div>
+  <div class="topbar-sep"></div>
+  <button class="btn" id="btn-open">📂 Open Folder</button>
+  <input type="file" id="file-input" multiple accept="image/*" webkitdirectory>
+  <div class="topbar-sep"></div>
+  <div id="progress-wrap"><div id="progress-bar"></div></div>
+  <div id="img-counter">—</div>
+  <div class="topbar-sep"></div>
+  <button class="btn" id="btn-prev" disabled>◀ Prev</button>
+  <button class="btn" id="btn-next" disabled>Next ▶</button>
+  <div style="margin-left:auto">
+    <button class="btn primary" id="btn-export" disabled>⬇ Export All</button>
+  </div>
+</div>
+
+<!-- ── Main layout ────────────────────────────────────────────────────────── -->
+<div id="layout">
+
+  <!-- Left: thumbnail strip -->
+  <div id="left-panel">
+    <div class="panel-title">Images</div>
+    <div id="thumb-list"></div>
+  </div>
+
+  <!-- Center: canvas workspace -->
+  <div id="canvas-area">
+
+    <!-- Drop zone (shown when no images loaded) -->
+    <div id="drop-zone">
+      <div class="dz-icon">🗂️</div>
+      <div class="dz-title">Drop a folder here</div>
+      <div class="dz-sub">or click below to browse<br>JPG · PNG · BMP · WEBP · TIFF</div>
+      <button class="dz-btn" id="dz-browse">Browse Images</button>
+    </div>
+
+    <!-- Model setup overlay (shown when models not found) -->
+    <div id="model-setup" class="hidden">
+      <div class="setup-box">
+        <div class="setup-title">Load SAM Models</div>
+        <div class="setup-sub">
+          Point to your local SAM ONNX model files.<br>
+          Place them in <code style="color:var(--accent)">models/encoder.onnx</code> and
+          <code style="color:var(--accent)">models/decoder.onnx</code>
+          and restart the server, or browse for them below.<br><br>
+          <strong>Download quantised ViT-B models (~26 MB total):</strong><br>
+          <a href="https://huggingface.co/datasets/Xenova/sam-vit-base/tree/main/onnx"
+             target="_blank" style="color:var(--blue)">
+            huggingface.co/datasets/Xenova/sam-vit-base
+          </a>
+        </div>
+        <div class="model-row">
+          <span class="micon">🔷</span>
+          <span class="mname">Encoder (encoder.onnx)</span>
+          <span class="mstatus err" id="enc-status">not found</span>
+          <input type="file" id="enc-file" accept=".onnx">
+          <span class="model-browse" id="enc-browse-btn">Browse…</span>
+        </div>
+        <div class="model-row">
+          <span class="micon">🔶</span>
+          <span class="mname">Decoder (decoder.onnx)</span>
+          <span class="mstatus err" id="dec-status">not found</span>
+          <input type="file" id="dec-file" accept=".onnx">
+          <span class="model-browse" id="dec-browse-btn">Browse…</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Canvas toolbar -->
+    <div id="canvas-toolbar">
+      <div class="tool-group">
+        <span style="font-size:10px;color:var(--muted);margin-right:2px">TOOL</span>
+        <button class="btn active" id="tool-click" title="Click-to-segment (SAM point) [1]">⊕ Click</button>
+        <button class="btn"        id="tool-bbox"  title="Bounding-box prompt [2]">⬜ BBox</button>
+        <button class="btn"        id="tool-neg"   title="Negative point (exclude region) [3]">⊖ Neg</button>
+      </div>
+      <div class="tool-sep"></div>
+      <div class="tool-group">
+        <button class="btn danger" id="btn-clear"   title="Clear all annotations for this image [R]">Clear</button>
+        <button class="btn danger" id="btn-del-ann" title="Delete selected annotation [Del]" disabled>Del</button>
+      </div>
+      <div class="tool-sep"></div>
+      <div class="tool-group">
+        <span style="font-size:10px;color:var(--muted)">ZOOM</span>
+        <button class="btn" id="btn-zoom-out">−</button>
+        <span id="zoom-label" style="font-size:11px;color:var(--muted);min-width:38px;text-align:center">100%</span>
+        <button class="btn" id="btn-zoom-in">+</button>
+        <button class="btn" id="btn-zoom-fit">Fit</button>
+      </div>
+      <div id="coords">x: —    y: —</div>
+    </div>
+
+    <!-- Canvas -->
+    <div id="canvas-wrap">
+      <div id="canvas-container">
+        <canvas id="main-canvas"></canvas>
+        <canvas id="overlay-canvas"></canvas>
+      </div>
+    </div>
+
+    <!-- Loading overlay -->
+    <div id="loading" class="hidden">
+      <div class="spinner"></div>
+      <div class="loading-msg" id="loading-msg">Loading…</div>
+    </div>
+
+  </div><!-- /canvas-area -->
+
+  <!-- Right: settings + annotation list -->
+  <div id="right-panel">
+
+    <div class="r-section">
+      <div class="r-label">Export Format</div>
+      <div class="radio-group">
+        <label class="radio-row checked">
+          <input type="radio" name="fmt" value="mask" checked>
+          <div>
+            <div class="radio-label">PNG Mask</div>
+            <div class="radio-sub">uint8 · 0 = bg / 255 = fg</div>
+          </div>
+        </label>
+        <label class="radio-row">
+          <input type="radio" name="fmt" value="json">
+          <div>
+            <div class="radio-label">JSON</div>
+            <div class="radio-sub">bbox + polygon + metadata</div>
+          </div>
+        </label>
+        <label class="radio-row">
+          <input type="radio" name="fmt" value="both">
+          <div>
+            <div class="radio-label">Both</div>
+            <div class="radio-sub">PNG mask + JSON</div>
+          </div>
+        </label>
+      </div>
+    </div>
+
+    <div class="r-section">
+      <div class="r-label">Class Label</div>
+      <div class="field-label">Name</div>
+      <input type="text" id="label-input" placeholder="object" value="object">
+    </div>
+
+    <div class="r-section" style="padding-bottom:6px">
+      <div class="r-label">
+        Annotations &nbsp;<span id="ann-count" style="color:var(--accent)">0</span>
+      </div>
+    </div>
+    <div id="ann-list"></div>
+
+    <div id="export-strip">
+      <div style="font-size:10px;color:var(--muted);margin-bottom:7px">SHORTCUTS</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:11px;color:var(--muted)">
+        <div><kbd>1</kbd> click tool</div>
+        <div><kbd>2</kbd> bbox tool</div>
+        <div><kbd>3</kbd> neg tool</div>
+        <div><kbd>R</kbd> clear image</div>
+        <div><kbd>Del</kbd> del selected</div>
+        <div><kbd>S</kbd> export</div>
+        <div><kbd>A</kbd><kbd>D</kbd> prev/next</div>
+        <div><kbd>F</kbd> fit zoom</div>
+      </div>
+    </div>
+
+  </div><!-- /right-panel -->
+
+</div><!-- /layout -->
+
+<!-- Status bar -->
+<div id="statusbar">
+  <div class="s-dot grey" id="sam-dot"></div>
+  <span id="sam-status">SAM not loaded</span>
+  <div class="topbar-sep" style="margin:0 6px"></div>
+  <span id="ann-status">No image loaded</span>
+</div>
+
+<div id="toast"></div>
+
+<script type="module" src="static/js/app.js"></script>
+</body>
+</html>
